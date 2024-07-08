@@ -40,23 +40,11 @@ def train(rank, world_size, nca_train_time, nca_train_data, parameterization, fo
     CHANNEL_N = int(parameterization.get("in_dim", 16))
     time_fac = int(parameterization.get("time_fac", 1.0))
     sp_rate = parameterization.get("speedup_rate", [5.0])
-    regularization_param = parameterization.get("reg_para", 0.0)
-    regularization_exp = parameterization.get("reg_exp", 1.0)
     path = fold_path + '/model.pkl'
     num_t = int(parameterization.get("tot_t", 8))
     echo_step = int(parameterization.get("echo_step", 20))
 
     wandb.login(key="22d390a0bcf1cbef03b661be9dfc56af0c6b5990")
-    
-    run = wandb.init(config=parameterization,
-                     project="NCATrain",
-                     name="ds_data" + str(nca_train_data.shape[0])+ "_" + str(parameterization.get("hid_lay_num", 0)) + "lay" +
-                          str(parameterization.get("neu_num", 0)) + "_drop" + str(parameterization.get("drop", 0))+ "_lr" +
-                          str(parameterization.get("lr", 0)) +
-                          "_seed" + str(rand_seed),
-                     dir=fold_path,
-                     job_type="training",
-                     reinit=True)
 
     ca = NCA(parameterization)
     ca.initialize_weights()
@@ -140,6 +128,7 @@ def train(rank, world_size, nca_train_time, nca_train_data, parameterization, fo
                 trainUtils.log_predictions(x_batch, xt_batch, epoch, test_table, 'train_')
                 ca.train()
                 torch.cuda.empty_cache()
+                
         with torch.no_grad():
             scheduler.step()
 
