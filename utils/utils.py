@@ -67,6 +67,26 @@ def log_predictions(self, x, y, epoch, test_table, note='valid_', min_number=3):
         test_table.add_data(str(epoch), img_id, wandb.Image(zx_img), wandb.Image(zy_img), wandb.Image(zdif_img),
                             str((1.-np.sum(zfil)/(x_valid.shape[1]*x_valid.shape[2]))*100.), wandb.Image(yx_img),
                             wandb.Image(yy_img), wandb.Image(ydif_img), str((1.-np.sum(yfil)/(x_valid.shape[1]*x_valid.shape[3]))*100.))
+        
+
+
+def log_result(loss_step, epoch, l_time_sum, l_valid, acc_train, acc_val, 
+               l_ea1, l_ea2, l_ea3, l_s, lv_ea1, lv_ea2, lv_ea3, lv_s, 
+               train_loss_step, valid_loss_step, x_valid, target_valid, test_table, fold_path):
+    # log result
+    loss_step.append(
+        str(epoch) + " training loss: " + str(l_time_sum.item()) + "  valid loss: " + str(l_valid) +
+        "  training acc: " + str(acc_train) + " %   valid accuracy: " + str(acc_val) + " %")
+    wandb.log({"epoch": epoch, "trainloss": l_time_sum.item(), "validloss":l_valid,
+            "trainacc":acc_train, "validacc":acc_val, "lea1_t":l_ea1,"lea2_t":l_ea2,"lea3_t":l_ea3,
+                "ls_t":l_s,"lea1_v":lv_ea1,"lea2_v":lv_ea2,"lea3_v":lv_ea3,"ls_v":lv_s})
+    train_loss_step.append(l_time_sum.item())
+    valid_loss_step.append(l_valid)
+    log_predictions(x_valid, target_valid, epoch, test_table)
+    wandb.log({"test_predictions": test_table})
+    with open(fold_path + "/loss_history.txt", "w") as outfile:
+        outfile.write("\n".join(loss_step))
+
             
 
 def zoom(img, scale=4):
@@ -127,6 +147,8 @@ def plot_image(world_size, x_valid, target_valid, train_loss_step, valid_loss_st
             # save the figure
             plt.savefig(path + '.jpg')
             plt.close()
+
+
 
 
 

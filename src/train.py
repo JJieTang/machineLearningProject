@@ -13,6 +13,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
 import itertools
+from sklearn.model_selection import train_test_split
 
 
 
@@ -59,7 +60,35 @@ def train_helper(x_batch, xt_batch, model, rank, num_t, time_fac):
         if nca_step < num_t-1:
             x_batch[:, 92:93, ...] = xt_batch[:, nca_step+1, 4:5].type(torch.FloatTensor)
     return x_batch, l_time_sum, l_ea1, l_ea2, l_ea3, l_s, nca_step
-            
+
+
+def evaluation(rank, world_size, fold_path, ca, validation_set, path, epoch, l_time_sum, loss_step, train_loss_step, valid_loss_step, l_s, num_t, time_fac, test_table, l_ea1, l_ea2, l_ea3):
+
+    # save model
+    if world_size > 1:
+        torch.save(ca.module.state_dict(), path)
+    else:
+        torch.save(ca.state_dict(), path)
+
+    ca.eval()
+    acc_val=[]
+    for j, (x_valid, target_valid) in enumerate(validation_set):
+
+        x_valid, l_valid, lv_ea1, lv_ea2, lv_ea3, lv_s, nca_step = train_helper(x_valid, target_valid, ca, rank, num_t, time_fac)
+
+        acc_val.append(cal_acc(x_valid, target_valid[:,nca_step]))
+    acc_train = np.mean(np.array(acc_train))
+    acc_val = np.mean(np.array(acc_val))
+    print(epoch, "valid losses: ", l_valid, lv_ea1, lv_ea2, lv_ea3, lv_s)
+    print(epoch, "training loss: ", l_time_sum.item(), "valid loss: ", l_valid,
+            "training acc: ", acc_train, "%   valid accuracy: ", acc_val, "%")
+    
+    log_result(loss_step, epoch, l_time_sum, l_valid, acc_train, acc_val, 
+               l_ea1, l_ea2, l_ea3, l_s, lv_ea1, lv_ea2, lv_ea3, lv_s, 
+               train_loss_step, valid_loss_step, x_valid, target_valid, test_table, fold_path)
+
+    return acc_val, l_valid
+
 
 
 
@@ -107,7 +136,7 @@ def train(rank, world_size, nca_train_time, nca_train_data, parameterization, fo
     # size for validation set
     val_size = max(int((nca_train_data.shape[0] *len(ini_t)) * 3 // 8),1)
     dataset = Dataset(ini_t, num_t, sp_rate, CHANNEL_N, nca_train_data)
-    x_train, y_train, x_val, y_val = dataset.x[:-val_size], dataset.y[:-val_size], dataset.x[-val_size:], dataset.y[-val_size:]
+    x_train, y_train, x_val, y_val = train_test_split(dataset.x, dataset.y, test_size=val_size, random_state=42, stratify=dataset.y)
     batch_size = int(parameterization.get("batch_size", 100))
 
 
@@ -154,38 +183,8 @@ def train(rank, world_size, nca_train_time, nca_train_data, parameterization, fo
 
             if ((epoch % echo_step == 0) & ((rank==0) | (world_size==1))):
 
-                # save model
-                if world_size > 1:
-                    torch.save(ca.module.state_dict(), path)
-                else:
-                    torch.save(ca.state_dict(), path)
-
-                ca.eval()
-                acc_val=[]
-                for j, (x_valid, target_valid) in enumerate(validation_set):
-
-                    x_valid, l_valid, lv_ea1, lv_ea2, lv_ea3, lv_s, nca_step = train_helper(x_valid, target_valid, ca, rank, num_t, time_fac)
-
-                    acc_val.append(cal_acc(x_valid, target_valid[:,nca_step]))
-                acc_train = np.mean(np.array(acc_train))
-                acc_val = np.mean(np.array(acc_val))
-                print(epoch, "valid losses: ", l_valid, lv_ea1, lv_ea2, lv_ea3, lv_s)
-                print(epoch, "training loss: ", l_time_sum.item(), "valid loss: ", l_valid,
-                      "training acc: ", acc_train, "%   valid accuracy: ", acc_val, "%")
-                
-                # log result
-                loss_step.append(
-                    str(epoch) + " training loss: " + str(l_time_sum.item()) + "  valid loss: " + str(l_valid) +
-                    "  training acc: " + str(acc_train) + " %   valid accuracy: " + str(acc_val) + " %")
-                wandb.log({"epoch": epoch, "trainloss": l_time_sum.item(), "validloss":l_valid,
-                      "trainacc":acc_train, "validacc":acc_val, "lea1_t":l_ea1,"lea2_t":l_ea2,"lea3_t":l_ea3,
-                           "ls_t":l_s,"lea1_v":lv_ea1,"lea2_v":lv_ea2,"lea3_v":lv_ea3,"ls_v":lv_s})
-                train_loss_step.append(l_time_sum.item())
-                valid_loss_step.append(l_valid)
-                log_predictions(x_valid, target_valid, epoch, test_table)
-                wandb.log({"test_predictions": test_table})
-                with open(fold_path + "/loss_history.txt", "w") as outfile:
-                    outfile.write("\n".join(loss_step))
+                acc_val, l_valid = evaluation(rank, world_size, fold_path, ca, validation_set, path, epoch, l_time_sum, 
+                           loss_step, train_loss_step, valid_loss_step, l_s, num_t, time_fac, test_table, l_ea1, l_ea2, l_ea3)
 
                 # early stop
                 early_stopper(acc_val)
